@@ -70,6 +70,7 @@ const (
 	ServiceCustomLogoURLDark              Key = `service.customlogourldark`
 	ServiceEnablePublicTeams              Key = `service.enablepublicteams`
 	ServiceBcryptRounds                   Key = `service.bcryptrounds`
+	ServiceProjectCreators                Key = `service.projectcreators`
 	ServiceEnableOpenIDTeamUserOnlySearch Key = `service.enableopenidteamusersearch`
 	ServiceIPExtractionMethod             Key = `service.ipextractionmethod`
 	ServiceTrustedProxies                 Key = `service.trustedproxies`
@@ -386,6 +387,7 @@ func initDefaultConfig() {
 	ServiceMotd.setDefault("")
 	ServiceEnableLinkSharing.setDefault(true)
 	ServiceEnableRegistration.setDefault(true)
+	ServiceProjectCreators.setDefault([]string{})
 	ServiceEnableTaskAttachments.setDefault(true)
 	ServiceTimeZone.setDefault("GMT")
 	ServiceEnableTaskComments.setDefault(true)

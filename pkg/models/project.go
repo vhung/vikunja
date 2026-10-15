@@ -1160,6 +1160,16 @@ func checkProjectParentBeforeUpdate(s *xorm.Session, project, storedProject *Pro
 			return ErrGenericForbidden{}
 		}
 
+		if parent == nil {
+			canCreateRoot, err := IsProjectCreator(s, auth)
+			if err != nil {
+				return err
+			}
+			if !canCreateRoot {
+				return ErrGenericForbidden{}
+			}
+		}
+
 		// Attaching under a new parent additionally requires Admin on
 		// that parent; detaching to the top level (0) has no new parent.
 		if parent != nil {

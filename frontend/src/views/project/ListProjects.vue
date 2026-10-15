@@ -20,6 +20,7 @@
 					{{ $t('filters.create.title') }}
 				</XButton>
 				<XButton
+					v-if="canCreateProjects"
 					v-cy="'new-project'"
 					:to="{name: 'project.create'}"
 					icon="plus"
@@ -48,6 +49,7 @@ import {useStorage} from '@vueuse/core'
 
 import {useProjects} from '@/composables/useProjects'
 import {useDelayedLoading} from '@/composables/useDelayedLoading'
+import {useAuthStore} from '@/stores/auth'
 
 const {t} = useI18n()
 const projectList = useProjects()
@@ -56,6 +58,13 @@ useTitle(() => t('project.title'))
 const showArchived = useStorage('showArchived', false)
 
 const loading = useDelayedLoading(() => projectList.isLoading)
+
+// can_create_projects is a fork-only field, so it is absent from the generated client types.
+const authStore = useAuthStore()
+const canCreateProjects = computed(() => {
+	const info = authStore.info as {can_create_projects?: boolean} | null
+	return info?.can_create_projects !== false
+})
 const projects = computed(() => {
 	return showArchived.value
 		? projectList.projectsArray

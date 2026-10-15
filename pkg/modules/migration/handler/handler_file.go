@@ -57,6 +57,10 @@ func RegisterFileMigrator(factory func() migration.FileMigrator) {
 // export runs for minutes, far longer than a reverse proxy will hold a request
 // open, and a client that gives up waiting cannot abort the import it started.
 func StartFileMigration(ms migration.FileMigrator, u *user2.User, file io.ReaderAt, size int64, options []byte) error {
+	if err := requireProjectCreator(u); err != nil {
+		return err
+	}
+
 	// The listener applies these again on its own instance; doing it here too
 	// turns an unusable config into a failed request instead of a failed job.
 	if err := applyMigratorOptions(ms, options); err != nil {

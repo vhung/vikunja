@@ -65,6 +65,10 @@ func (mw *MigrationWeb) AuthURL(c *echo.Context) error {
 
 // StartMigration validates credentials and dispatches a migration while holding its claim.
 func StartMigration(ms migration.Migrator, u *user2.User) error {
+	if err := requireProjectCreator(u); err != nil {
+		return err
+	}
+
 	status, err := migration.ClaimMigration(ms, u)
 	if err != nil {
 		return err

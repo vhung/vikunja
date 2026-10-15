@@ -289,7 +289,7 @@ func (p *Project) CanCreate(s *xorm.Session, a web.Auth) (bool, error) {
 	if is {
 		return false, nil
 	}
-	return true, nil
+	return IsProjectCreator(s, a)
 }
 
 // IsAdmin returns whether the user has admin permissions on the project or not

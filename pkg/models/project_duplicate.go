@@ -54,7 +54,7 @@ func (pd *ProjectDuplicate) CanCreate(s *xorm.Session, a web.Auth) (canCreate bo
 	}
 
 	if pd.ParentProjectID == 0 { // no parent project
-		return canRead, err
+		return IsProjectCreator(s, a)
 	}
 
 	// Placing the copy under a parent requires write access to that parent.

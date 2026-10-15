@@ -79,6 +79,11 @@
                     "comment": "Whether to let new users registering themselves or not"
                 },
                 {
+                    "key": "projectcreators",
+                    "default_value": "",
+                    "comment": "Usernames allowed to create top-level projects, comma or space separated (env: VIKUNJA_SERVICE_PROJECTCREATORS). Empty lets everyone create them. Everyone keeps creating child projects under projects they can write to."
+                },
+                {
                     "key": "enabletaskattachments",
                     "default_value": "true",
                     "comment": "Whether to enable task attachments or not"
