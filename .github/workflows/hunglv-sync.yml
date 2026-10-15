@@ -1,0 +1,172 @@
+# Fork pm.hunglv.com: rebase the hunglv patch onto every new upstream release
+# and publish ghcr.io/vhung/vikunja:<tag>-hunglv. Never deploys anything.
+name: hunglv sync
+
+on:
+  schedule:
+    - cron: '17 1 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Upstream tag, e.g. v2.7.0. Empty = newest stable tag.'
+        required: false
+        default: ''
+      force:
+        description: 'Rebuild even if hunglv/<tag> already exists.'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: hunglv-sync
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/vhung/vikunja
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout patch branch
+        uses: actions/checkout@v4
+        with:
+          ref: hunglv/main
+          fetch-depth: 0
+          ssh-key: ${{ secrets.HUNGLV_DEPLOY_KEY }}
+
+      - name: Pick target tag
+        id: target
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/go-vikunja/vikunja.git
+          git fetch --quiet upstream 'refs/tags/v*:refs/tags/v*'
+          newest=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          tag="${INPUT_TAG:-$newest}"
+          git rev-parse -q --verify "refs/tags/$tag" >/dev/null || { echo "::error::tag $tag not found upstream"; exit 1; }
+          base=$(git describe --tags --abbrev=0 --match 'v*' HEAD)
+          branch="hunglv/$tag"
+          skip=false
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null && [ "$FORCE" != "true" ]; then
+            skip=true
+          fi
+          {
+            echo "tag=$tag"
+            echo "base=$base"
+            echo "branch=$branch"
+            echo "skip=$skip"
+            echo "is_newest=$([ "$tag" = "$newest" ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+          echo "target $tag (patch base $base, newest $newest, skip $skip)"
+
+      - name: Rebase patch onto tag
+        if: steps.target.outputs.skip == 'false'
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+          BASE: ${{ steps.target.outputs.base }}
+          BRANCH: ${{ steps.target.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git config user.name mDevBox
+          git config user.email mdevbox.com@gmail.com
+          patch_head=$(git rev-parse HEAD)
+          if [ "$TAG" = "$BASE" ]; then
+            git checkout -B "$BRANCH" "$patch_head"
+          else
+            git checkout -B "$BRANCH" "refs/tags/$TAG"
+            if ! git cherry-pick "$BASE..$patch_head"; then
+              git status --short | head -50
+              git cherry-pick --abort || true
+              echo "::error::patch does not apply cleanly on $TAG, rebase hunglv/main by hand"
+              exit 1
+            fi
+          fi
+          git log --oneline "refs/tags/$TAG..HEAD"
+
+      - name: Setup Go
+        if: steps.target.outputs.skip == 'false'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test patch
+        if: steps.target.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          mkdir -p frontend/dist && touch frontend/dist/index.html
+          go test -short -p 1 -timeout 30m ./pkg/models/ ./pkg/modules/migration/...
+          go test -p 1 -timeout 30m -run 'TestProjectCreatorsAPI|TestHumaUserShow|TestUserShow|Project' ./pkg/webtests
+
+      - name: Set up Docker Buildx
+        if: steps.target.outputs.skip == 'false'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: steps.target.outputs.skip == 'false'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags
+        if: steps.target.outputs.skip == 'false'
+        id: tags
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+          IS_NEWEST: ${{ steps.target.outputs.is_newest }}
+        run: |
+          tags="$IMAGE:$TAG-hunglv"
+          if [ "$IS_NEWEST" = "true" ]; then
+            tags="$tags,$IMAGE:latest-hunglv"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image
+        if: steps.target.outputs.skip == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: RELEASE_VERSION=${{ steps.target.outputs.tag }}-hunglv
+          labels: |
+            org.opencontainers.image.source=https://github.com/vhung/vikunja
+            org.opencontainers.image.version=${{ steps.target.outputs.tag }}-hunglv
+
+      - name: Push patched branch
+        if: steps.target.outputs.skip == 'false'
+        env:
+          BRANCH: ${{ steps.target.outputs.branch }}
+          IS_NEWEST: ${{ steps.target.outputs.is_newest }}
+        run: |
+          set -euo pipefail
+          git push --force origin "HEAD:refs/heads/$BRANCH"
+          if [ "$IS_NEWEST" = "true" ]; then
+            git push --force origin "HEAD:refs/heads/hunglv/main"
+          fi
+
+      - name: Notify Telegram
+        if: always() && steps.target.outputs.skip != 'true'
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TAG: ${{ steps.target.outputs.tag }}
+          STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ]; then
+            echo "Telegram secrets not set, skipping notification"
+            exit 0
+          fi
+          curl -sS -o /dev/null -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TG_CHAT" \
+            --data-urlencode "text=vikunja-hunglv $TAG: $STATUS $RUN_URL"
